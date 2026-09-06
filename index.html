@@ -302,6 +302,53 @@
     cursor:pointer;
   }
   .ghost-btn:hover{border-color:var(--amber);color:var(--text);}
+
+  .study-check-row{grid-column:1/-1;margin-top:-4px;}
+  .study-check{
+    display:inline-flex;align-items:center;gap:6px;
+    font-family:'Inter',sans-serif;font-size:12.5px;color:var(--text-dim);
+    cursor:pointer;
+  }
+  .study-check input{accent-color:var(--teal);}
+
+  .name-chips{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;margin-top:2px;}
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--panel-2);border:1px solid var(--hair);
+    border-radius:999px;padding:4px 8px 4px 12px;
+    font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--text-dim);
+    cursor:pointer;
+  }
+  .chip:hover{border-color:var(--amber);color:var(--text);}
+  .chip .x{color:var(--text-dim);font-size:13px;line-height:1;padding:0 2px;}
+  .chip .x:hover{color:var(--rust);}
+  .chip-empty{font-size:11px;color:var(--text-dim);font-family:'IBM Plex Mono',monospace;}
+
+  .study-tag{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:9px;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    color:var(--teal);
+    border:1px solid var(--teal);
+    border-radius:4px;
+    padding:1px 5px;
+    white-space:nowrap;
+  }
+
+  .feedback-panel{margin-top:24px;}
+  .feedback-form{display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+  .feedback-form textarea{
+    width:100%;min-height:88px;resize:vertical;
+    background:var(--panel-2);border:1px solid var(--hair);border-radius:8px;
+    padding:10px;color:var(--text);font-family:'Inter',sans-serif;font-size:13.5px;
+  }
+  .feedback-form input[type=email]{
+    width:100%;background:var(--panel-2);border:1px solid var(--hair);border-radius:8px;
+    padding:9px 10px;color:var(--text);font-family:'Inter',sans-serif;font-size:13.5px;
+  }
+  .feedback-form textarea:focus, .feedback-form input:focus{outline:none;border-color:var(--amber);}
+  .feedback-form .addbtn{align-self:flex-start;}
 </style>
 </head>
 <body>
@@ -331,6 +378,11 @@
       </div>
       <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
 
+      <div class="totals-bar" style="margin-bottom:18px;">
+        <span class="label">STUDY TIME</span>
+        <span class="val" id="studyVal" style="color:var(--teal);">0h 0m</span>
+      </div>
+
       <div id="warningBox"></div>
 
       <form class="addtask" id="addForm">
@@ -347,17 +399,35 @@
           <input type="time" id="endTime" value="10:00" required>
         </div>
         <button type="submit" class="addbtn">Add block</button>
+        <div class="study-check-row">
+          <label class="study-check"><input type="checkbox" id="isStudy"> Count as study time</label>
+        </div>
+        <div class="name-chips" id="nameChips"></div>
       </form>
 
       <ul class="task-list" id="taskList"></ul>
       <div class="empty-state" id="emptyState">No blocks yet — add your first one above.</div>
 
       <div class="footer-row">
-        <button class="ghost-btn" id="presetBtn">Load my schedule</button>
+        <button class="ghost-btn" id="saveScheduleBtn">💾 Save my schedule</button>
+        <button class="ghost-btn" id="loadScheduleBtn">📂 Load saved</button>
+        <button class="ghost-btn" id="copyTextBtn">📋 Copy as text</button>
         <button class="ghost-btn" id="clearBtn">Clear all</button>
       </div>
     </div>
   </div>
+
+  <section class="editor-panel feedback-panel">
+    <div class="totals-bar" style="margin-bottom:0;">
+      <span class="label" style="font-size:13px;color:var(--text);font-weight:600;">FEEDBACK &amp; SUGGESTIONS</span>
+    </div>
+    <form id="feedbackForm" class="feedback-form">
+      <textarea id="feedbackMessage" placeholder="Found a bug? Have an idea to make this more useful for your prep? Tell me here." required></textarea>
+      <input type="email" id="feedbackEmail" placeholder="Your email (optional, in case of a follow-up)">
+      <button type="submit" class="addbtn">Send feedback</button>
+    </form>
+    <div id="feedbackStatus" style="font-family:'IBM Plex Mono',monospace;font-size:12px;margin-top:4px;"></div>
+  </section>
 
   <section style="margin-top:40px;padding-top:24px;border-top:1px solid var(--hair);color:var(--text-dim);font-size:13px;line-height:1.7;">
     <p><strong style="color:var(--text);">About Day Ledger</strong> — a free 24-hour timetable planner built for UPSC, UPPCS, CAPF AC, and other competitive exam aspirants who plan their study day in fixed time slots. Add each block of your day — study slots, meals, revision, sleep — and see it laid out on a visual 24-hour dial, with total allocated time and overlap warnings calculated automatically. No signup, no ads, works entirely in your browser.</p>
@@ -432,9 +502,53 @@ function colorFor(name){
   return colorMap[name];
 }
 
-function addTask(name,start,end){
+let savedNames = [];
+function loadSavedNames(){
+  try{
+    const raw = localStorage.getItem('dayLedgerTaskNames');
+    savedNames = raw ? JSON.parse(raw) : [];
+  }catch(e){ savedNames = []; }
+}
+function persistSavedNames(){
+  try{ localStorage.setItem('dayLedgerTaskNames', JSON.stringify(savedNames)); }catch(e){}
+}
+function rememberName(name){
+  savedNames = savedNames.filter(n=>n!==name);
+  savedNames.unshift(name);
+  if(savedNames.length>14) savedNames = savedNames.slice(0,14);
+  persistSavedNames();
+}
+function renderChips(){
+  const box = document.getElementById('nameChips');
+  if(!savedNames.length){
+    box.innerHTML = '<span class="chip-empty">Task names you use will show up here for quick reuse</span>';
+    return;
+  }
+  box.innerHTML = savedNames.map(n=>
+    `<span class="chip" data-name="${n}">${n}<span class="x" data-remove="${n}">×</span></span>`
+  ).join('');
+  box.querySelectorAll('.chip').forEach(chip=>{
+    chip.addEventListener('click',(e)=>{
+      if(e.target.classList.contains('x')) return;
+      document.getElementById('taskName').value = chip.dataset.name;
+      document.getElementById('taskName').focus();
+    });
+  });
+  box.querySelectorAll('.x').forEach(x=>{
+    x.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      savedNames = savedNames.filter(n=>n!==x.dataset.remove);
+      persistSavedNames();
+      renderChips();
+    });
+  });
+}
+
+function addTask(name,start,end,isStudy){
   const color = colorFor(name);
-  tasks.push({id:Date.now()+Math.random(), name, start, end, color});
+  tasks.push({id:Date.now()+Math.random(), name, start, end, color, isStudy: !!isStudy});
+  rememberName(name);
+  renderChips();
   render();
 }
 function deleteTask(id){
@@ -489,6 +603,7 @@ function render(){
     li.innerHTML = `
       <span class="swatch" style="background:${t.color}"></span>
       <span class="name">${t.name}</span>
+      ${t.isStudy ? '<span class="study-tag">study</span>' : ''}
       <span class="time">${minToLabel(t.start)}–${minToLabel(t.end)}</span>
       <span class="dur">${fmtDur(duration(t.start,t.end))}</span>
       <button aria-label="Remove">×</button>
@@ -530,6 +645,9 @@ function render(){
     ? `over by<br>${fmtDur(totalMin-1440)}`
     : `${fmtDur(1440-totalMin)}<br>left`;
 
+  const studyMin = tasks.filter(t=>t.isStudy).reduce((sum,t)=>sum+duration(t.start,t.end),0);
+  document.getElementById('studyVal').textContent = fmtDur(studyMin);
+
   // warnings
   const clashes = findOverlaps();
   let msg = '';
@@ -570,8 +688,9 @@ document.getElementById('addForm').addEventListener('submit',e=>{
   const name = document.getElementById('taskName').value.trim();
   const start = timeToMin(document.getElementById('startTime').value);
   const end = timeToMin(document.getElementById('endTime').value);
+  const isStudy = document.getElementById('isStudy').checked;
   if(!name) return;
-  addTask(name,start,end);
+  addTask(name,start,end,isStudy);
   document.getElementById('taskName').value='';
 });
 
@@ -582,34 +701,93 @@ document.getElementById('clearBtn').addEventListener('click',()=>{
   render();
 });
 
-document.getElementById('presetBtn').addEventListener('click',()=>{
-  tasks = [];
-  colorCursor = 0;
-  colorMap = {};
-  const preset = [
-    ['Buff','04:50','05:15'],
-    ['Health','05:15','06:15'],
-    ['Buff','06:15','07:00'],
-    ['CA','07:00','08:00'],
-    ['Breakfast+Buff','08:00','09:00'],
-    ['Slot-1','09:00','12:00'],
-    ['Lunch','12:00','13:00'],
-    ['Slot-2','13:00','15:00'],
-    ['Buff','15:00','15:15'],
-    ['Slot-3','15:15','17:00'],
-    ['Buff','17:00','17:15'],
-    ['Slot-4','17:15','19:00'],
-    ['Dinner','19:00','20:15'],
-    ['Slot-5','20:15','22:00'],
-    ['Buff','22:00','22:30'],
-    ['Sleep','22:30','04:50'],
-  ];
-  preset.forEach(([name,s,e])=>addTask(name,timeToMin(s),timeToMin(e)));
+document.getElementById('saveScheduleBtn').addEventListener('click',()=>{
+  const btn = document.getElementById('saveScheduleBtn');
+  try{
+    localStorage.setItem('dayLedgerSavedSchedule', JSON.stringify({tasks,colorMap,colorCursor}));
+    const original = btn.textContent;
+    btn.textContent = '✓ Saved!';
+    setTimeout(()=>{btn.textContent = original;},1500);
+  }catch(e){
+    alert('Could not save — your browser storage may be full or disabled.');
+  }
+});
+
+document.getElementById('loadScheduleBtn').addEventListener('click',()=>{
+  let raw;
+  try{ raw = localStorage.getItem('dayLedgerSavedSchedule'); }catch(e){ raw = null; }
+  if(!raw){
+    alert('No saved schedule yet. Build your day, then click "Save my schedule" first.');
+    return;
+  }
+  if(tasks.length && !confirm('This will replace your current blocks with your saved schedule. Continue?')) return;
+  const saved = JSON.parse(raw);
+  tasks = saved.tasks || [];
+  colorMap = saved.colorMap || {};
+  colorCursor = saved.colorCursor || 0;
+  render();
+});
+
+function scheduleAsText(){
+  if(!tasks.length) return 'No blocks added yet.';
+  const sorted = [...tasks].sort((a,b)=>a.start-b.start);
+  const lines = sorted.map(t=>`${minToLabel(t.start)}–${minToLabel(t.end)}  ${t.name}${t.isStudy ? ' (study)' : ''}`);
+  const totalMin = tasks.reduce((s,t)=>s+duration(t.start,t.end),0);
+  const studyMin = tasks.filter(t=>t.isStudy).reduce((s,t)=>s+duration(t.start,t.end),0);
+  lines.push('');
+  lines.push(`Total allocated: ${fmtDur(totalMin)} / 24h`);
+  lines.push(`Study time: ${fmtDur(studyMin)}`);
+  return lines.join('\n');
+}
+
+document.getElementById('copyTextBtn').addEventListener('click', async ()=>{
+  const text = scheduleAsText();
+  const btn = document.getElementById('copyTextBtn');
+  const original = btn.textContent;
+  try{
+    await navigator.clipboard.writeText(text);
+    btn.textContent = '✓ Copied!';
+  }catch(e){
+    window.prompt('Copy your schedule below:', text);
+    btn.textContent = original;
+    return;
+  }
+  setTimeout(()=>{btn.textContent = original;},1500);
+});
+
+document.getElementById('feedbackForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const statusEl = document.getElementById('feedbackStatus');
+  const message = document.getElementById('feedbackMessage').value.trim();
+  const email = document.getElementById('feedbackEmail').value.trim();
+  if(!message) return;
+  statusEl.textContent = 'Sending...';
+  statusEl.style.color = 'var(--text-dim)';
+  try{
+    const res = await fetch('https://formspree.io/f/mkjnvrqd', {
+      method:'POST',
+      headers:{'Accept':'application/json','Content-Type':'application/json'},
+      body: JSON.stringify({message, email})
+    });
+    if(res.ok){
+      statusEl.textContent = 'Thanks — feedback sent!';
+      statusEl.style.color = 'var(--teal)';
+      document.getElementById('feedbackMessage').value='';
+      document.getElementById('feedbackEmail').value='';
+    } else {
+      throw new Error('not connected');
+    }
+  }catch(err){
+    statusEl.textContent = 'Could not send — this form still needs to be connected by the site owner.';
+    statusEl.style.color = 'var(--rust)';
+  }
 });
 
 loadState();
+loadSavedNames();
 drawTicks();
 render();
+renderChips();
 </script>
 </body>
 </html>
